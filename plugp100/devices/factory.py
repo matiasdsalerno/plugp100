@@ -136,8 +136,25 @@ async def _try_protocols_at(
     ]
     device_info_request = TapoRequest.get_device_info()
     for i, protocol in enumerate(protocols):
-        info = await protocol.send_request(device_info_request)
-        if info.is_success():
+        try:
+            info = await protocol.send_request(device_info_request)
+            succeeded = info.is_success()
+        except Exception as exc:
+            # PassthroughProtocol.send_request lets aiohttp errors (timeouts,
+            # SSL failures, refused connections, etc.) propagate as raw
+            # exceptions instead of wrapping them in Try.Failure like
+            # KlapProtocol does. Without this catch the first protocol failure
+            # aborts the whole guess loop and the HTTPS:443 fallback below
+            # never gets a chance to run.
+            _LOGGER.debug(
+                "Protocol %s at %s raised %s, trying next...",
+                type(protocol).__name__,
+                config.url,
+                exc,
+            )
+            await protocol.close()
+            continue
+        if succeeded:
             _LOGGER.debug(
                 "Found working protocol %s at %s", type(protocol), config.url
             )
